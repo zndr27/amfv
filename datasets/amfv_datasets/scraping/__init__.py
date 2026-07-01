@@ -27,6 +27,16 @@ from amfv_datasets.scraping.nice import (
     scrape_guideline,
     scrape_nice,
 )
+from amfv_datasets.scraping.who import (
+    WhoFetchError,
+    WhoListingPage,
+    WhoPublicationRef,
+    build_publication_text,
+    list_publications,
+    publication_ref_from_url,
+    scrape_publication,
+    scrape_who,
+)
 
 __all__ = [
     "GuidanceRef",
@@ -39,8 +49,12 @@ __all__ = [
     "ScrapedDocument",
     "ScraperSource",
     "USER_AGENT",
+    "WhoFetchError",
+    "WhoListingPage",
+    "WhoPublicationRef",
     "absolute_unique_urls",
     "build_guideline_text",
+    "build_publication_text",
     "clean_text",
     "document_title",
     "default_client",
@@ -48,7 +62,11 @@ __all__ = [
     "guidance_ref_from_url",
     "html_to_markdown",
     "list_published_guidance",
+    "list_publications",
+    "publication_ref_from_url",
     "scrape_guideline",
     "scrape_listing_documents",
     "scrape_nice",
+    "scrape_publication",
+    "scrape_who",
 ]
