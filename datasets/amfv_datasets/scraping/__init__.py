@@ -18,18 +18,11 @@ from amfv_datasets.scraping.html import (
     html_to_markdown,
 )
 from amfv_datasets.scraping.idsa import (
-    IDSA_DATASET_DISPLAY_NAME,
-    IDSA_DATASET_NAME,
-    LISTING_URL,
     IDSAFetchError,
-    IDSAGuidelineListingPage,
     IDSAGuidelineRef,
     idsa_ref_from_url,
     list_practice_guidelines,
     scrape_idsa,
-)
-from amfv_datasets.scraping.idsa import (
-    build_guideline_text as build_idsa_guideline_text,
 )
 from amfv_datasets.scraping.idsa import (
     scrape_guideline as scrape_idsa_guideline,
@@ -49,12 +42,8 @@ __all__ = [
     "GuidanceRef",
     "GuidanceListingPage",
     "IDSAFetchError",
-    "IDSA_DATASET_DISPLAY_NAME",
-    "IDSA_DATASET_NAME",
-    "IDSAGuidelineListingPage",
     "IDSAGuidelineRef",
     "LinkMode",
-    "LISTING_URL",
     "NiceFetchError",
     "OutputFormat",
     "ScrapeError",
@@ -63,7 +52,6 @@ __all__ = [
     "ScraperSource",
     "USER_AGENT",
     "absolute_unique_urls",
-    "build_idsa_guideline_text",
     "build_guideline_text",
     "clean_text",
     "document_title",

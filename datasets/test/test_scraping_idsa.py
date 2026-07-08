@@ -9,19 +9,25 @@ from amfv_datasets.scraping.idsa import (
     LISTING_URL,
     IDSAFetchError,
     IDSAGuidelineRef,
-    build_guideline_text,
     idsa_ref_from_url,
     list_practice_guidelines,
     scrape_guideline,
     scrape_idsa,
 )
 
+_LISTING_CASES = (
+    ("current-guideline", "Current Guideline", 2024, ("Current",)),
+    ("current-endorsed-guideline", "Current Endorsed Guideline", 2023, ("Current", "Endorsed")),
+    ("endorsed-guideline", "Endorsed Guideline", 2022, ("Endorsed",)),
+    ("archived-guideline", "Archived Guideline", 2021, ("Archived",)),
+    ("development-guideline", "Development Guideline", 2020, ("In Development",)),
+    ("archived-development-guideline", "Archived Development Guideline", 2019, ("Archived", "In Development")),
+)
 
-def test_list_practice_guidelines_parses_and_filters_default_statuses() -> None:
-    """The IDSA listing includes only current non-development guidelines by default."""
-    client = httpx.Client(transport=httpx.MockTransport(_listing_handler), base_url=BASE_URL)
 
-    listing = list_practice_guidelines(client)
+def test_list_practice_guidelines_parses_listing_fields() -> None:
+    """The IDSA listing parser normalizes title, URL, year, and statuses."""
+    listing = list_practice_guidelines(_listing_client())
 
     assert listing.total == 2
     assert listing.refs == [
@@ -42,45 +48,36 @@ def test_list_practice_guidelines_parses_and_filters_default_statuses() -> None:
     ]
 
 
-def test_list_practice_guidelines_can_include_archived_statuses() -> None:
-    """Archived guidelines are included only when requested."""
-    client = httpx.Client(transport=httpx.MockTransport(_listing_handler), base_url=BASE_URL)
+@pytest.mark.parametrize(
+    ("kwargs", "expected_slugs"),
+    [
+        ({}, ["current-guideline", "current-endorsed-guideline"]),
+        (
+            {"include_archived": True},
+            ["current-guideline", "current-endorsed-guideline", "archived-guideline"],
+        ),
+        (
+            {"include_in_development": True},
+            ["current-guideline", "current-endorsed-guideline", "development-guideline"],
+        ),
+        (
+            {"include_archived": True, "include_in_development": True},
+            [
+                "current-guideline",
+                "current-endorsed-guideline",
+                "archived-guideline",
+                "development-guideline",
+                "archived-development-guideline",
+            ],
+        ),
+    ],
+    ids=["default", "include-archived", "include-in-development", "include-both"],
+)
+def test_list_practice_guidelines_filters_statuses(kwargs: dict[str, bool], expected_slugs: list[str]) -> None:
+    """Status flags preserve the intended IDSA listing inclusion policy."""
+    listing = list_practice_guidelines(_listing_client(), **kwargs)
 
-    listing = list_practice_guidelines(client, include_archived=True)
-
-    assert [ref.slug for ref in listing.refs] == [
-        "current-guideline",
-        "current-endorsed-guideline",
-        "archived-guideline",
-    ]
-
-
-def test_list_practice_guidelines_can_include_in_development_statuses() -> None:
-    """In-development guidelines are included only when requested."""
-    client = httpx.Client(transport=httpx.MockTransport(_listing_handler), base_url=BASE_URL)
-
-    listing = list_practice_guidelines(client, include_in_development=True)
-
-    assert [ref.slug for ref in listing.refs] == [
-        "current-guideline",
-        "current-endorsed-guideline",
-        "development-guideline",
-    ]
-
-
-def test_list_practice_guidelines_requires_both_flags_for_archived_development_statuses() -> None:
-    """Guidelines marked both archived and in development require both inclusion flags."""
-    client = httpx.Client(transport=httpx.MockTransport(_listing_handler), base_url=BASE_URL)
-
-    listing = list_practice_guidelines(client, include_archived=True, include_in_development=True)
-
-    assert [ref.slug for ref in listing.refs] == [
-        "current-guideline",
-        "current-endorsed-guideline",
-        "archived-guideline",
-        "development-guideline",
-        "archived-development-guideline",
-    ]
+    assert [ref.slug for ref in listing.refs] == expected_slugs
 
 
 def test_idsa_ref_from_url_normalizes_practice_guideline_url() -> None:
@@ -110,71 +107,47 @@ def test_idsa_ref_from_url_rejects_non_guideline_urls(url: str) -> None:
         idsa_ref_from_url(url)
 
 
-def test_build_guideline_text_extracts_content_and_link_metadata() -> None:
+def test_scrape_guideline_extracts_content_and_link_metadata() -> None:
     """Guideline page content is converted to markdown and noisy UI is stripped."""
-    client = httpx.Client(transport=httpx.MockTransport(_guideline_handler), base_url=BASE_URL)
+    document = scrape_guideline(_guideline_client(_guideline_html()), _ref())
 
-    content, section_count, title, links_metadata = build_guideline_text(
-        client,
-        IDSAGuidelineRef(
-            title="Current Guideline",
-            slug="current-guideline",
-            page_url="https://www.idsociety.org/practice-guideline/current-guideline/",
-            year=2024,
-            statuses=("Current",),
-        ),
-    )
+    assert document.title == "Current Guideline"
+    assert document.section_count == 3
+    assert "# Current Guideline" in document.content
+    assert "## Abstract" in document.content
+    assert "## Recommendations" in document.content
+    assert "[Download PDF](https://academic.oup.com/example.pdf)" in document.content
+    assert "Recommendation text with [evidence](https://doi.org/10.1093/cid/example)." in document.content
+    assert "Back to top" not in document.content
+    assert "Table of Contents" not in document.content
+    assert "https://www.idsociety.org#abstract" not in document.content
+    assert document.metadata["external_links"] == [
+        "https://academic.oup.com/example.pdf",
+        "https://doi.org/10.1093/cid/example",
+    ]
+    assert document.metadata["pdf_links"] == ["https://academic.oup.com/example.pdf"]
+    assert document.metadata["content_length_chars"] == len(document.content)
+    assert document.metadata["quality_flags"] == ["short_content"]
 
-    assert title == "Current Guideline"
-    assert section_count == 3
-    assert "# Current Guideline" in content
-    assert "## Abstract" in content
-    assert "## Recommendations" in content
-    assert "Recommendation text with [evidence](https://doi.org/10.1093/cid/example)." in content
-    assert "Back to top" not in content
-    assert "Table of Contents" not in content
-    assert "https://www.idsociety.org#abstract" not in content
-    assert links_metadata == {
-        "external_links": [
-            "https://academic.oup.com/example.pdf",
-            "https://doi.org/10.1093/cid/example",
-        ],
-        "pdf_links": ["https://academic.oup.com/example.pdf"],
-    }
 
-    stripped_content, _section_count, _title, _links_metadata = build_guideline_text(
-        client,
-        IDSAGuidelineRef(
-            title="Current Guideline",
-            slug="current-guideline",
-            page_url="https://www.idsociety.org/practice-guideline/current-guideline/",
-            year=2024,
-            statuses=("Current",),
-        ),
-        link_mode=LinkMode.STRIP,
-    )
-    assert "Recommendation text with evidence." in stripped_content
+def test_scrape_guideline_strips_links_when_requested() -> None:
+    """The IDSA scraper honors the shared link-mode option."""
+    document = scrape_guideline(_guideline_client(_guideline_html()), _ref(), link_mode=LinkMode.STRIP)
+
+    assert "Recommendation text with evidence." in document.content
+    assert "[evidence]" not in document.content
 
 
 def test_scrape_idsa_returns_normalized_document() -> None:
     """The IDSA scraper returns normalized scraped documents."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if str(request.url) == LISTING_URL:
-            return httpx.Response(200, text=_listing_html())
-        if str(request.url) == "https://www.idsociety.org/practice-guideline/current-guideline/":
-            return httpx.Response(200, text=_guideline_html())
-        raise AssertionError(f"Unexpected URL: {request.url}")
-
-    original_client_factory = "amfv_datasets.scraping.idsa.default_client"
-    transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(_scrape_idsa_handler)
 
     class ClientFactory:
         def __call__(self) -> httpx.Client:
             return httpx.Client(transport=transport)
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(original_client_factory, ClientFactory())
+        monkeypatch.setattr("amfv_datasets.scraping.idsa.default_client", ClientFactory())
         scrape_run = scrape_idsa(documents=1)
         documents = list(scrape_run.documents)
 
@@ -184,111 +157,80 @@ def test_scrape_idsa_returns_normalized_document() -> None:
     assert documents[0].external_id == "idsa-current-guideline"
     assert documents[0].metadata["statuses"] == ["Current"]
     assert documents[0].metadata["year"] == 2024
-    assert documents[0].metadata["pdf_links"] == ["https://academic.oup.com/example.pdf"]
-    assert documents[0].metadata["content_length_chars"] == len(documents[0].content)
-    assert documents[0].metadata["quality_flags"] == ["short_content"]
+    assert documents[0].metadata["slug"] == "current-guideline"
+    assert documents[0].metadata["listing_url"] == LISTING_URL
 
 
-def test_scrape_guideline_does_not_flag_long_content() -> None:
-    """Long guideline content records length without short-content quality flags."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "https://www.idsociety.org/practice-guideline/long-guideline/"
-        return httpx.Response(200, text=_long_guideline_html())
-
-    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL)
-
-    document = scrape_guideline(
-        client,
-        IDSAGuidelineRef(
-            title="Long Guideline",
-            slug="long-guideline",
-            page_url="https://www.idsociety.org/practice-guideline/long-guideline/",
-            year=2024,
-            statuses=("Current",),
-        ),
-    )
+@pytest.mark.parametrize(
+    ("paragraph", "expected_flags"),
+    [
+        ("Useful abstract.", ["short_content"]),
+        ("Recommendation text. " * 700, []),
+    ],
+    ids=["short", "long"],
+)
+def test_scrape_guideline_sets_content_quality_flags(paragraph: str, expected_flags: list[str]) -> None:
+    """Short content is flagged while long content is left unflagged."""
+    document = scrape_guideline(_guideline_client(_guideline_html(paragraph=paragraph)), _ref())
 
     assert document.metadata["content_length_chars"] == len(document.content)
-    assert document.metadata["quality_flags"] == []
+    assert document.metadata["quality_flags"] == expected_flags
 
 
-def _listing_handler(request: httpx.Request) -> httpx.Response:
-    assert str(request.url) == LISTING_URL
-    return httpx.Response(200, text=_listing_html())
+def _listing_client() -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == LISTING_URL
+        return httpx.Response(200, text=_listing_html())
+
+    return httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL)
 
 
-def _guideline_handler(request: httpx.Request) -> httpx.Response:
-    assert str(request.url) == "https://www.idsociety.org/practice-guideline/current-guideline/"
-    return httpx.Response(200, text=_guideline_html())
+def _guideline_client(content_html: str) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://www.idsociety.org/practice-guideline/current-guideline/"
+        return httpx.Response(200, text=content_html)
+
+    return httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL)
+
+
+def _scrape_idsa_handler(request: httpx.Request) -> httpx.Response:
+    if str(request.url) == LISTING_URL:
+        return httpx.Response(200, text=_listing_html())
+    if str(request.url) == "https://www.idsociety.org/practice-guideline/current-guideline/":
+        return httpx.Response(200, text=_guideline_html())
+    raise AssertionError(f"Unexpected URL: {request.url}")
 
 
 def _listing_html() -> str:
-    return """
-        <html>
-          <div class="alpha-listing">
-            <ul class="list-pages">
-              <li>
-                <ul class="list-pages__categories"><li class="category-dot category-dot-current">Current</li></ul>
-                <a class="list-pages__link" href="/practice-guideline/current-guideline/">Current Guideline</a>
-                <span class="list-pages__year">2024</span>
-              </li>
-              <li>
-                <ul class="list-pages__categories">
-                  <li class="category-dot category-dot-current">Current</li>
-                  <li class="category-dot category-dot-endorsed">Endorsed</li>
-                </ul>
-                <a class="list-pages__link" href="/practice-guideline/current-endorsed-guideline/">
-                  Current Endorsed Guideline
-                </a>
-                <span class="list-pages__year">2023</span>
-              </li>
-              <li>
-                <ul class="list-pages__categories"><li class="category-dot category-dot-endorsed">Endorsed</li></ul>
-                <a class="list-pages__link" href="/practice-guideline/endorsed-guideline/">Endorsed Guideline</a>
-                <span class="list-pages__year">2022</span>
-              </li>
-              <li>
-                <ul class="list-pages__categories"><li class="category-dot category-dot-archived">Archived</li></ul>
-                <a class="list-pages__link" href="/practice-guideline/archived-guideline/">Archived Guideline</a>
-                <span class="list-pages__year">2021</span>
-              </li>
-              <li>
-                <ul class="list-pages__categories">
-                  <li class="category-dot category-dot-in-development">In Development</li>
-                </ul>
-                <a class="list-pages__link" href="/practice-guideline/development-guideline/">
-                  Development Guideline
-                </a>
-                <span class="list-pages__year">2020</span>
-              </li>
-              <li>
-                <ul class="list-pages__categories">
-                  <li class="category-dot category-dot-archived">Archived</li>
-                  <li class="category-dot category-dot-in-development">In Development</li>
-                </ul>
-                <a class="list-pages__link" href="/practice-guideline/archived-development-guideline/">
-                  Archived Development Guideline
-                </a>
-                <span class="list-pages__year">2019</span>
-              </li>
-            </ul>
-          </div>
-        </html>
+    items = "\n".join(
+        _listing_item(slug=slug, title=title, year=year, statuses=statuses)
+        for slug, title, year, statuses in _LISTING_CASES
+    )
+    return f'<html><div class="alpha-listing"><ul class="list-pages">{items}</ul></div></html>'
+
+
+def _listing_item(*, slug: str, title: str, year: int, statuses: tuple[str, ...]) -> str:
+    categories = "".join(f'<li class="category-dot">{status}</li>' for status in statuses)
+    return f"""
+        <li>
+          <ul class="list-pages__categories">{categories}</ul>
+          <a class="list-pages__link" href="/practice-guideline/{slug}/">{title}</a>
+          <span class="list-pages__year">{year}</span>
+        </li>
     """
 
 
-def _guideline_html() -> str:
-    return """
+def _guideline_html(*, title: str = "Current Guideline", paragraph: str = "Useful abstract.") -> str:
+    return f"""
         <html>
-          <title>Current Guideline | IDSA</title>
+          <title>{title} | IDSA</title>
           <div class="standardpage-col-left">
             <nav>Navigation noise</nav>
             <p>Intro column noise.</p>
           </div>
           <div class="standardpage-col-left">
             <p><a href="https://academic.oup.com/example.pdf">Download PDF</a></p>
-            <h1>Current Guideline</h1>
+            <h1>{title}</h1>
             <h3>Table of Contents</h3>
             <ul>
               <li><a href="#abstract">Abstract</a></li>
@@ -297,7 +239,7 @@ def _guideline_html() -> str:
             <p class="social">Share this page</p>
             <p>Published January 1, 2024</p>
             <h2>Abstract</h2>
-            <p>Useful abstract.</p>
+            <p>{paragraph}</p>
             <h2>Recommendations</h2>
             <p>Recommendation text with <a href="https://doi.org/10.1093/cid/example">evidence</a>.</p>
             <p>Back to top</p>
@@ -306,15 +248,11 @@ def _guideline_html() -> str:
     """
 
 
-def _long_guideline_html() -> str:
-    long_text = "Recommendation text. " * 700
-    return f"""
-        <html>
-          <title>Long Guideline | IDSA</title>
-          <div class="standardpage-col-left">
-            <h1>Long Guideline</h1>
-            <h2>Recommendations</h2>
-            <p>{long_text}</p>
-          </div>
-        </html>
-    """
+def _ref() -> IDSAGuidelineRef:
+    return IDSAGuidelineRef(
+        title="Current Guideline",
+        slug="current-guideline",
+        page_url="https://www.idsociety.org/practice-guideline/current-guideline/",
+        year=2024,
+        statuses=("Current",),
+    )

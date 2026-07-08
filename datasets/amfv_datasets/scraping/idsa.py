@@ -21,10 +21,8 @@ from amfv_datasets.scraping.html import LinkMode, absolute_unique_urls, clean_te
 
 BASE_URL = "https://www.idsociety.org"
 LISTING_URL = f"{BASE_URL}/practice-guideline/all-practice-guidelines"
-IDSA_DATASET_NAME = "idsa-webscrape"
-IDSA_DATASET_DISPLAY_NAME = "IDSA Webscrape"
 DOCUMENT_DELAY_SECONDS = 5.0
-SHORT_CONTENT_CHARS = 10_000
+_SHORT_CONTENT_CHARS = 10_000
 
 _IDSA_PATH_RE = re.compile(r"^/practice-guideline/(?P<slug>[^/]+)(?:/|$)", re.IGNORECASE)
 _BACK_TO_TOP_RE = re.compile(r"^\s*back to top\s*$", re.IGNORECASE)
@@ -106,20 +104,12 @@ def list_practice_guidelines(
     return IDSAGuidelineListingPage(refs=refs, total=len(refs))
 
 
-def build_guideline_text(
+def _build_guideline_text(
     client: httpx.Client,
     ref: IDSAGuidelineRef,
     *,
     link_mode: LinkMode = LinkMode.KEEP,
 ) -> tuple[str, int, str, dict[str, list[str]]]:
-    """Scrape a guideline page into markdown text, section count, title, and links.
-
-    Args:
-        client: HTTP client used to fetch the guideline page.
-        ref: IDSA guideline reference to scrape.
-        link_mode: Whether links are kept as markdown links or stripped to their
-            visible text (default: LinkMode.KEEP).
-    """
     response = client.get(ref.page_url)
     response.raise_for_status()
     title = document_title(response.text, fallback=ref.title)
@@ -144,7 +134,7 @@ def scrape_guideline(
         link_mode: Whether links are kept as markdown links or stripped to their
             visible text (default: LinkMode.KEEP).
     """
-    content, section_count, title, links_metadata = build_guideline_text(client, ref, link_mode=link_mode)
+    content, section_count, title, links_metadata = _build_guideline_text(client, ref, link_mode=link_mode)
     return ScrapedDocument(
         source="idsa",
         external_id=f"idsa-{ref.slug}",
@@ -372,7 +362,7 @@ def _section_count(content_html: str) -> int:
 
 def _quality_flags(content: str) -> list[str]:
     flags: list[str] = []
-    if len(content) < SHORT_CONTENT_CHARS:
+    if len(content) < _SHORT_CONTENT_CHARS:
         flags.append("short_content")
     return flags
 
@@ -384,14 +374,10 @@ def _page_url(slug: str) -> str:
 __all__ = [
     "BASE_URL",
     "DOCUMENT_DELAY_SECONDS",
-    "IDSA_DATASET_DISPLAY_NAME",
-    "IDSA_DATASET_NAME",
     "IDSAFetchError",
     "IDSAGuidelineListingPage",
     "IDSAGuidelineRef",
     "LISTING_URL",
-    "SHORT_CONTENT_CHARS",
-    "build_guideline_text",
     "idsa_ref_from_url",
     "list_practice_guidelines",
     "scrape_guideline",
