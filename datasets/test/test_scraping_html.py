@@ -68,3 +68,12 @@ def test_html_to_markdown_can_strip_links() -> None:
     html_text = '<p>Offer <a href="https://example.org">treatment</a>.</p>'
 
     assert html_to_markdown(html_text, link_mode=LinkMode.STRIP) == "Offer treatment."
+
+
+def test_html_to_markdown_absolutizes_remote_image_references() -> None:
+    """Relative image references remain usable outside the source website."""
+    html_text = '<p><img src="/uploads/flowchart.png" alt="Treatment flowchart"></p>'
+
+    assert html_to_markdown(html_text, base_url="https://example.org") == (
+        "![Treatment flowchart](https://example.org/uploads/flowchart.png)"
+    )
