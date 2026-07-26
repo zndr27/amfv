@@ -55,6 +55,10 @@ _NON_ARTICLE_TITLE_RE = re.compile(r"""^["']|^"?(?:sandbox|template|user)\s*:"""
 # WikiDoc marks its transcluded navigation templates with class="infobox";
 # content tables are "wikitable" or unclassed.
 _NAV_TABLE_XPATH = ".//table[contains(concat(' ', normalize-space(@class), ' '), ' infobox ')]"
+# Every article opens with an "Editor-In-Chief: ...; Associate Editor(s)-In-Chief:
+# ..." paragraph. It is authorship, not clinical content, and it sits in the
+# position retrieval weights most heavily, so it moves to metadata.editors.
+_EDITOR_BYLINE_RE = re.compile(r"^\s*(?:Editor|Associate Editor)[\s(-]*in[\s-]*chief", re.IGNORECASE)
 
 
 class WikiDocFetchError(ScrapeError):
@@ -138,12 +142,30 @@ def list_wikidoc_articles(
     return refs, payload.get("continue", {}).get("apcontinue")
 
 
-def _strip_nav_tables(article_html: str) -> str:
-    """Remove WikiDoc's transcluded navigation templates."""
+def _strip_chrome(article_html: str) -> tuple[str, str]:
+    """Remove WikiDoc's navigation templates and editor byline.
+
+    Returns the cleaned HTML and the byline text, which is kept as metadata so
+    CC BY-SA attribution survives without the names sitting at the top of the
+    document content.
+
+    Args:
+        article_html: Parsed article HTML from `action=parse`.
+    """
     root = lxml_html.fragment_fromstring(article_html, create_parent="div")
     for table in root.xpath(_NAV_TABLE_XPATH):
         table.getparent().remove(table)
-    return lxml_html.tostring(root, encoding="unicode")
+
+    editors = ""
+    for paragraph in root.xpath(".//p"):
+        text = " ".join((paragraph.text_content() or "").split())
+        if not _EDITOR_BYLINE_RE.match(text):
+            continue
+        editors = text
+        paragraph.getparent().remove(paragraph)
+        break
+
+    return lxml_html.tostring(root, encoding="unicode"), editors
 
 
 def build_wikidoc_article_text(
@@ -175,7 +197,7 @@ def build_wikidoc_article_text(
     if not parse:
         raise WikiDocFetchError(f"No parse result for article {ref.title!r}")
 
-    article_html = _strip_nav_tables(parse["text"]["*"])
+    article_html, editors = _strip_chrome(parse["text"]["*"])
     content = html_to_markdown(article_html, link_mode=link_mode, base_url=BASE_URL)
     if not content:
         raise WikiDocFetchError(f"No readable content for article {ref.title!r}")
@@ -184,6 +206,7 @@ def build_wikidoc_article_text(
     metadata = {
         "pageid": parse.get("pageid", ref.pageid),
         "revid": parse.get("revid"),
+        "editors": editors,
         "categories": [category["*"] for category in parse.get("categories", [])],
         # Many WikiDoc topics are "microchapter" hubs whose body is only links to
         # sub-pages; record the length so a corpus build can filter them out.

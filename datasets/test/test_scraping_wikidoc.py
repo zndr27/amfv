@@ -72,6 +72,8 @@ def test_build_wikidoc_article_text_strips_nav_tables_but_keeps_content_tables()
         '<a href="http://www.ncbi.nlm.nih.gov/entrez/query.fcgi">Most recent articles</a>'
         "</td></tr></tbody></table>"
         '<table class="infobox"><tbody><tr><td>Hypertension Microchapters</td></tr></tbody></table>'
+        "<p><b>Editor-In-Chief:</b> C. Michael Gibson, M.S., M.D.; "
+        "<b>Associate Editor(s)-in-Chief:</b> Priyamvada Singh, M.B.B.S.</p>"
         "<p>Hypertension is persistently elevated arterial blood pressure.</p>"
         '<table class="wikitable"><tbody><tr><td>Stage 2</td><td>140/90 mmHg</td></tr></tbody></table>'
         "</div>"
@@ -98,6 +100,11 @@ def test_build_wikidoc_article_text_strips_nav_tables_but_keeps_content_tables()
     assert "ncbi.nlm.nih.gov" not in content
     assert "persistently elevated arterial blood pressure" in content
     assert "140/90 mmHg" in content
+    # The byline moves to metadata rather than being discarded: CC BY-SA needs
+    # attribution, but the names should not head the retrievable content.
+    assert "Michael Gibson" not in content
+    assert metadata["editors"].startswith("Editor-In-Chief:")
+    assert "Priyamvada Singh" in metadata["editors"]
     assert section_count == 2
     assert title == "Hypertension"
     assert metadata["revid"] == 1744458
