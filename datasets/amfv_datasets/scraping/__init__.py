@@ -27,6 +27,16 @@ from amfv_datasets.scraping.nice import (
     scrape_guideline,
     scrape_nice,
 )
+from amfv_datasets.scraping.pubmed import (
+    PubMedArticleRef,
+    PubMedFetchError,
+    PubMedListingPage,
+    build_pubmed_article_text,
+    list_pubmed_guidelines,
+    pubmed_ref_from_url,
+    scrape_pubmed,
+    scrape_pubmed_article,
+)
 
 __all__ = [
     "GuidanceRef",
@@ -34,6 +44,9 @@ __all__ = [
     "LinkMode",
     "NiceFetchError",
     "OutputFormat",
+    "PubMedArticleRef",
+    "PubMedFetchError",
+    "PubMedListingPage",
     "ScrapeError",
     "ScrapeRun",
     "ScrapedDocument",
@@ -41,6 +54,7 @@ __all__ = [
     "USER_AGENT",
     "absolute_unique_urls",
     "build_guideline_text",
+    "build_pubmed_article_text",
     "clean_text",
     "document_title",
     "default_client",
@@ -48,7 +62,11 @@ __all__ = [
     "guidance_ref_from_url",
     "html_to_markdown",
     "list_published_guidance",
+    "list_pubmed_guidelines",
+    "pubmed_ref_from_url",
     "scrape_guideline",
     "scrape_listing_documents",
     "scrape_nice",
+    "scrape_pubmed",
+    "scrape_pubmed_article",
 ]
