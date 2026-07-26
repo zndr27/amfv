@@ -1,0 +1,263 @@
+"""Tests for WikiDoc scraping helpers."""
+
+import json
+
+import httpx
+import pytest
+
+from amfv_datasets.scraping import base
+from amfv_datasets.scraping.html import LinkMode
+from amfv_datasets.scraping.wikidoc import (
+    BASE_URL,
+    WikiDocFetchError,
+    WikiDocPageRef,
+    build_wikidoc_article_text,
+    list_wikidoc_articles,
+    scrape_wikidoc,
+    scrape_wikidoc_article,
+    wikidoc_ref_from_url,
+)
+
+
+def _client(payload: dict) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api.php"
+        assert request.url.params["format"] == "json"
+        return httpx.Response(200, text=json.dumps(payload))
+
+    return httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL)
+
+
+def test_list_wikidoc_articles_filters_sandbox_and_template_pseudo_titles() -> None:
+    """Mainspace drafts created with literal quotes are not articles."""
+    payload = {
+        "continue": {"apcontinue": "Hypertension"},
+        "query": {
+            "allpages": [
+                {"pageid": 1, "title": "Hypertelorism"},
+                {"pageid": 2, "title": '"sandbox:A.R"'},
+                {"pageid": 3, "title": '"template:AM"'},
+                {"pageid": 5, "title": "SANDBOX:HT"},
+                {"pageid": 6, "title": "''Asparagaceae''"},
+                {"pageid": 4, "title": "Hypertension"},
+            ]
+        },
+    }
+
+    refs, token = list_wikidoc_articles(_client(payload))
+
+    assert refs == [
+        WikiDocPageRef(title="Hypertelorism", pageid=1),
+        WikiDocPageRef(title="Hypertension", pageid=4),
+    ]
+    assert token == "Hypertension"
+
+
+def test_list_wikidoc_articles_returns_no_token_when_listing_is_exhausted() -> None:
+    """A batch without a continue block ends pagination."""
+    payload = {"query": {"allpages": [{"pageid": 9, "title": "Zoonosis"}]}}
+
+    refs, token = list_wikidoc_articles(_client(payload))
+
+    assert [ref.title for ref in refs] == ["Zoonosis"]
+    assert token is None
+
+
+def test_build_wikidoc_article_text_strips_nav_tables_but_keeps_content_tables() -> None:
+    """Transcluded `table.infobox` navigation is removed; `wikitable` data is kept."""
+    article_html = (
+        '<div class="mw-parser-output">'
+        '<table class="infobox bordered"><tbody><tr><td>'
+        "<b>WikiDoc Resources for Hypertension</b>"
+        '<a href="http://www.ncbi.nlm.nih.gov/entrez/query.fcgi">Most recent articles</a>'
+        "</td></tr></tbody></table>"
+        '<table class="infobox"><tbody><tr><td>Hypertension Microchapters</td></tr></tbody></table>'
+        "<p>Hypertension is persistently elevated arterial blood pressure.</p>"
+        '<table class="wikitable"><tbody><tr><td>Stage 2</td><td>140/90 mmHg</td></tr></tbody></table>'
+        "</div>"
+    )
+    payload = {
+        "parse": {
+            "title": "Hypertension",
+            "pageid": 249048,
+            "revid": 1744458,
+            "text": {"*": article_html},
+            "categories": [{"*": "Cardiology"}, {"*": "Up-To-Date"}],
+            "sections": [{"line": "Overview"}, {"line": "Causes"}],
+        }
+    }
+
+    content, section_count, title, metadata = build_wikidoc_article_text(
+        _client(payload),
+        WikiDocPageRef(title="Hypertension"),
+        link_mode=LinkMode.STRIP,
+    )
+
+    assert "WikiDoc Resources" not in content
+    assert "Microchapters" not in content
+    assert "ncbi.nlm.nih.gov" not in content
+    assert "persistently elevated arterial blood pressure" in content
+    assert "140/90 mmHg" in content
+    assert section_count == 2
+    assert title == "Hypertension"
+    assert metadata["revid"] == 1744458
+    assert metadata["categories"] == ["Cardiology", "Up-To-Date"]
+    assert metadata["license"] == "CC BY-SA 3.0"
+    assert metadata["content_length_chars"] == len(content)
+
+
+def test_scrape_wikidoc_article_normalizes_into_a_scraped_document() -> None:
+    """Scraped articles use the shared source/external_id conventions."""
+    payload = {
+        "parse": {
+            "title": "Sepsis",
+            "pageid": 100,
+            "revid": 200,
+            "text": {"*": "<div><p>Sepsis is life-threatening organ dysfunction.</p></div>"},
+            "categories": [],
+            "sections": [],
+        }
+    }
+
+    document = scrape_wikidoc_article(_client(payload), WikiDocPageRef(title="Sepsis"))
+
+    assert document.source == "wikidoc"
+    assert document.external_id == "wikidoc-Sepsis"
+    assert document.url == "https://www.wikidoc.org/index.php/Sepsis"
+    assert document.section_count == 1
+    assert "life-threatening organ dysfunction" in document.content
+
+
+def test_build_wikidoc_article_text_rejects_an_empty_parse_result() -> None:
+    """A missing parse block is an error, not an empty document."""
+    with pytest.raises(WikiDocFetchError):
+        build_wikidoc_article_text(_client({}), WikiDocPageRef(title="Nonexistent"))
+
+
+def test_scrape_wikidoc_threads_the_continue_token_across_listing_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pagination advances by token, crosses a batch boundary, and terminates.
+
+    Without the `exhausted` flag the final batch's `None` token would restart the
+    listing from the beginning of the alphabet and never stop, so the fake API
+    refuses to serve more listing batches than the test expects.
+    """
+    batches = {
+        None: {
+            "continue": {"apcontinue": "Sepsis"},
+            "query": {"allpages": [{"pageid": 1, "title": "Hypertension"}]},
+        },
+        "Sepsis": {"query": {"allpages": [{"pageid": 2, "title": "Sepsis"}]}},
+    }
+    seen_tokens: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        if params.get("meta") == "siteinfo":
+            return httpx.Response(200, text=json.dumps({"query": {"statistics": {"articles": 2}}}))
+        if params.get("list") == "allpages":
+            token = params.get("apcontinue")
+            assert len(seen_tokens) < len(batches), f"listing did not terminate; tokens={seen_tokens}"
+            seen_tokens.append(token)
+            return httpx.Response(200, text=json.dumps(batches[token]))
+        title = params["page"]
+        return httpx.Response(
+            200,
+            text=json.dumps(
+                {
+                    "parse": {
+                        "title": title,
+                        "pageid": 0,
+                        "revid": 7,
+                        "text": {"*": f"<div><p>{title} body text.</p></div>"},
+                        "categories": [],
+                        "sections": [],
+                    }
+                }
+            ),
+        )
+
+    monkeypatch.setattr(
+        "amfv_datasets.scraping.wikidoc.default_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL),
+    )
+    monkeypatch.setattr(base.time, "sleep", lambda _seconds: None)
+
+    run = scrape_wikidoc(documents=None)
+    documents = list(run.documents)
+
+    assert seen_tokens == [None, "Sepsis"]
+    assert [document.external_id for document in documents] == ["wikidoc-Hypertension", "wikidoc-Sepsis"]
+    assert run.total == 2
+
+
+def test_scrape_wikidoc_skips_articles_wikidoc_cannot_serve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One corrupt page does not abort a run over the rest of the listing."""
+    listing = {
+        "query": {
+            "allpages": [
+                {"pageid": 1, "title": "Hypertelorism"},
+                {"pageid": 2, "title": "Sepsis"},
+            ]
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        if params.get("meta") == "siteinfo":
+            return httpx.Response(200, text=json.dumps({"query": {"statistics": {"articles": 2}}}))
+        if params.get("list") == "allpages":
+            return httpx.Response(200, text=json.dumps(listing))
+        title = params["page"]
+        if title == "Hypertelorism":
+            # WikiDoc returns HTTP 200 with an error body for corrupt pages.
+            return httpx.Response(200, text=json.dumps({"error": {"info": "There is no revision with ID 388595."}}))
+        return httpx.Response(
+            200,
+            text=json.dumps(
+                {
+                    "parse": {
+                        "title": title,
+                        "pageid": 2,
+                        "revid": 9,
+                        "text": {"*": f"<div><p>{title} body text.</p></div>"},
+                        "categories": [],
+                        "sections": [],
+                    }
+                }
+            ),
+        )
+
+    monkeypatch.setattr(
+        "amfv_datasets.scraping.wikidoc.default_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL),
+    )
+    monkeypatch.setattr(base.time, "sleep", lambda _seconds: None)
+
+    documents = list(scrape_wikidoc(documents=None).documents)
+
+    assert [document.external_id for document in documents] == ["wikidoc-Sepsis"]
+
+
+def test_wikidoc_ref_from_url_round_trips_titles_with_spaces() -> None:
+    """Article URLs use underscores; titles use spaces."""
+    ref = wikidoc_ref_from_url("https://www.wikidoc.org/index.php/Hypertension_in_the_elderly")
+
+    assert ref.title == "Hypertension in the elderly"
+    assert ref.slug == "Hypertension_in_the_elderly"
+    assert ref.page_url == "https://www.wikidoc.org/index.php/Hypertension_in_the_elderly"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.org/index.php/Hypertension",
+        "https://www.wikidoc.org/wiki/Hypertension",
+        "ftp://www.wikidoc.org/index.php/Hypertension",
+    ],
+)
+def test_wikidoc_ref_from_url_rejects_non_article_urls(url: str) -> None:
+    """Only wikidoc.org article paths are accepted."""
+    with pytest.raises(WikiDocFetchError):
+        wikidoc_ref_from_url(url)
