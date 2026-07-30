@@ -71,6 +71,7 @@ class WikiDocPageRef:
 
     title: str
     pageid: int | None = None
+    last_revised: str = ""
 
     @property
     def slug(self) -> str:
@@ -115,31 +116,71 @@ def _is_article_title(title: str) -> bool:
     return not _NON_ARTICLE_TITLE_RE.match(title)
 
 
+def _latest_revision_timestamp(page: dict[str, Any]) -> str:
+    """Return the ISO timestamp of a listing entry's latest revision, or ""."""
+    revisions = page.get("revisions") or []
+    return revisions[0].get("timestamp", "") if revisions else ""
+
+
 def list_wikidoc_articles(
-    client: httpx.Client, apcontinue: str | None = None
+    client: httpx.Client, gapcontinue: str | None = None
 ) -> tuple[list[WikiDocPageRef], str | None]:
     """Return one batch of mainspace article refs and the next continue token.
 
+    Uses `allpages` as a generator rather than a plain list so each ref carries
+    its last revision timestamp, at no extra request. Pages whose latest revision
+    is unreadable come back without one; those are the corrupt pages
+    `_scrape_or_skip` drops anyway, so a missing timestamp is not an error here.
+
     Args:
         client: HTTP client used to call the WikiDoc API.
-        apcontinue: Continue token from the previous batch (default: None).
+        gapcontinue: Continue token from the previous batch (default: None).
     """
     params: dict[str, Any] = {
         "action": "query",
-        "list": "allpages",
-        "apnamespace": 0,
-        "apfilterredir": "nonredirects",
-        "aplimit": LISTING_PAGE_SIZE,
+        "generator": "allpages",
+        "gapnamespace": 0,
+        "gapfilterredir": "nonredirects",
+        "gaplimit": LISTING_PAGE_SIZE,
+        "prop": "revisions",
+        "rvprop": "timestamp",
+        "formatversion": 2,
     }
-    if apcontinue:
-        params["apcontinue"] = apcontinue
+    if gapcontinue:
+        params["gapcontinue"] = gapcontinue
     payload = _api_get(client, params)
     refs = [
-        WikiDocPageRef(title=page["title"], pageid=page.get("pageid"))
-        for page in payload.get("query", {}).get("allpages", [])
+        WikiDocPageRef(
+            title=page["title"],
+            pageid=page.get("pageid"),
+            last_revised=_latest_revision_timestamp(page),
+        )
+        for page in payload.get("query", {}).get("pages", [])
         if _is_article_title(page["title"])
     ]
-    return refs, payload.get("continue", {}).get("apcontinue")
+    # A generator returns pages unordered, unlike `list=allpages`. The continue
+    # token is still title-keyed, so sorting within the batch restores the exact
+    # sequence the plain listing gave, and with it a reproducible --documents N.
+    refs.sort(key=lambda ref: ref.title)
+    return refs, payload.get("continue", {}).get("gapcontinue")
+
+
+def _fetch_revision_timestamp(client: httpx.Client, title: str) -> str:
+    """Look up one article's latest revision timestamp.
+
+    Only the `--url` path reaches this: listing refs already carry the timestamp
+    from the generator query, so a full run adds no requests.
+
+    Args:
+        client: HTTP client used to call the WikiDoc API.
+        title: Article title to look up.
+    """
+    payload = _api_get(
+        client,
+        {"action": "query", "titles": title, "prop": "revisions", "rvprop": "timestamp", "formatversion": 2},
+    )
+    pages = payload.get("query", {}).get("pages", [])
+    return _latest_revision_timestamp(pages[0]) if pages else ""
 
 
 def _strip_chrome(article_html: str) -> tuple[str, str]:
@@ -206,6 +247,11 @@ def build_wikidoc_article_text(
     metadata = {
         "pageid": parse.get("pageid", ref.pageid),
         "revid": parse.get("revid"),
+        # WikiDoc articles are frequently a decade old, and `revid` alone cannot
+        # tell you which. Recording the timestamp lets a corpus build filter on
+        # recency later without re-scraping, the same reason
+        # `content_length_chars` is here.
+        "last_revised": ref.last_revised or _fetch_revision_timestamp(client, ref.title),
         "editors": editors,
         "categories": [category["*"] for category in parse.get("categories", [])],
         # Many WikiDoc topics are "microchapter" hubs whose body is only links to

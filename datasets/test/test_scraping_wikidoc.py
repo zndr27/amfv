@@ -31,15 +31,15 @@ def _client(payload: dict) -> httpx.Client:
 def test_list_wikidoc_articles_filters_sandbox_and_template_pseudo_titles() -> None:
     """Mainspace drafts created with literal quotes are not articles."""
     payload = {
-        "continue": {"apcontinue": "Hypertension"},
+        "continue": {"gapcontinue": "Hypertension"},
         "query": {
-            "allpages": [
-                {"pageid": 1, "title": "Hypertelorism"},
-                {"pageid": 2, "title": '"sandbox:A.R"'},
-                {"pageid": 3, "title": '"template:AM"'},
-                {"pageid": 5, "title": "SANDBOX:HT"},
-                {"pageid": 6, "title": "''Asparagaceae''"},
-                {"pageid": 4, "title": "Hypertension"},
+            "pages": [
+                {"pageid": 1, "title": "Hypertelorism", "revisions": [{"timestamp": "2012-03-04T05:06:07Z"}]},
+                {"pageid": 2, "title": '"sandbox:A.R"', "revisions": [{"timestamp": "2020-07-17T19:55:56Z"}]},
+                {"pageid": 3, "title": '"template:AM"', "revisions": [{"timestamp": "2019-01-01T00:00:00Z"}]},
+                {"pageid": 5, "title": "SANDBOX:HT", "revisions": [{"timestamp": "2019-01-01T00:00:00Z"}]},
+                {"pageid": 6, "title": "''Asparagaceae''", "revisions": [{"timestamp": "2019-01-01T00:00:00Z"}]},
+                {"pageid": 4, "title": "Hypertension", "revisions": [{"timestamp": "2022-08-09T10:11:12Z"}]},
             ]
         },
     }
@@ -47,20 +47,57 @@ def test_list_wikidoc_articles_filters_sandbox_and_template_pseudo_titles() -> N
     refs, token = list_wikidoc_articles(_client(payload))
 
     assert refs == [
-        WikiDocPageRef(title="Hypertelorism", pageid=1),
-        WikiDocPageRef(title="Hypertension", pageid=4),
+        WikiDocPageRef(title="Hypertelorism", pageid=1, last_revised="2012-03-04T05:06:07Z"),
+        WikiDocPageRef(title="Hypertension", pageid=4, last_revised="2022-08-09T10:11:12Z"),
     ]
     assert token == "Hypertension"
 
 
 def test_list_wikidoc_articles_returns_no_token_when_listing_is_exhausted() -> None:
     """A batch without a continue block ends pagination."""
-    payload = {"query": {"allpages": [{"pageid": 9, "title": "Zoonosis"}]}}
+    page = {"pageid": 9, "title": "Zoonosis", "revisions": [{"timestamp": "2024-01-02T03:04:05Z"}]}
+    payload = {"query": {"pages": [page]}}
 
     refs, token = list_wikidoc_articles(_client(payload))
 
     assert [ref.title for ref in refs] == ["Zoonosis"]
     assert token is None
+
+
+def test_list_wikidoc_articles_sorts_by_title() -> None:
+    """A generator returns pages unordered; the batch is resorted to match `list=allpages`."""
+    payload = {
+        "query": {
+            "pages": [
+                {"pageid": 3, "title": "Sepsis", "revisions": [{"timestamp": "2020-01-01T00:00:00Z"}]},
+                {"pageid": 1, "title": "Asthma", "revisions": [{"timestamp": "2020-01-01T00:00:00Z"}]},
+                {"pageid": 2, "title": "Hypertension", "revisions": [{"timestamp": "2020-01-01T00:00:00Z"}]},
+            ]
+        },
+    }
+
+    refs, _ = list_wikidoc_articles(_client(payload))
+
+    assert [ref.title for ref in refs] == ["Asthma", "Hypertension", "Sepsis"]
+
+
+def test_list_wikidoc_articles_tolerates_pages_without_a_readable_revision() -> None:
+    """Corrupt pages come back with no `revisions`; they list with an empty timestamp."""
+    payload = {
+        "query": {
+            "pages": [
+                {"pageid": 1, "title": "(+)-borneol dehydrogenase"},
+                {"pageid": 2, "title": "Hypertension", "revisions": [{"timestamp": "2022-08-09T10:11:12Z"}]},
+            ]
+        },
+    }
+
+    refs, _ = list_wikidoc_articles(_client(payload))
+
+    assert [(ref.title, ref.last_revised) for ref in refs] == [
+        ("(+)-borneol dehydrogenase", ""),
+        ("Hypertension", "2022-08-09T10:11:12Z"),
+    ]
 
 
 def test_build_wikidoc_article_text_strips_nav_tables_but_keeps_content_tables() -> None:
@@ -135,6 +172,61 @@ def test_scrape_wikidoc_article_normalizes_into_a_scraped_document() -> None:
     assert "life-threatening organ dysfunction" in document.content
 
 
+def test_build_wikidoc_article_text_records_the_listing_revision_timestamp() -> None:
+    """A ref carrying a timestamp needs no extra lookup to record it."""
+    payload = {
+        "parse": {
+            "title": "Sepsis",
+            "pageid": 100,
+            "revid": 200,
+            "text": {"*": "<div><p>Sepsis is life-threatening organ dysfunction.</p></div>"},
+            "categories": [],
+            "sections": [],
+        }
+    }
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, text=json.dumps(payload))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL)
+    ref = WikiDocPageRef(title="Sepsis", pageid=100, last_revised="2017-05-06T07:08:09Z")
+
+    _content, _sections, _title, metadata = build_wikidoc_article_text(client, ref)
+
+    assert metadata["last_revised"] == "2017-05-06T07:08:09Z"
+    assert len(calls) == 1
+
+
+def test_build_wikidoc_article_text_looks_up_a_timestamp_the_ref_lacks() -> None:
+    """The `--url` path builds a ref with no timestamp, so it is fetched."""
+    parse_payload = {
+        "parse": {
+            "title": "Sepsis",
+            "pageid": 100,
+            "revid": 200,
+            "text": {"*": "<div><p>Sepsis is life-threatening organ dysfunction.</p></div>"},
+            "categories": [],
+            "sections": [],
+        }
+    }
+    revisions_payload = {
+        "query": {"pages": [{"pageid": 100, "title": "Sepsis", "revisions": [{"timestamp": "2019-02-03T04:05:06Z"}]}]}
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("action") == "parse":
+            return httpx.Response(200, text=json.dumps(parse_payload))
+        return httpx.Response(200, text=json.dumps(revisions_payload))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE_URL)
+
+    _content, _sections, _title, metadata = build_wikidoc_article_text(client, WikiDocPageRef(title="Sepsis"))
+
+    assert metadata["last_revised"] == "2019-02-03T04:05:06Z"
+
+
 def test_build_wikidoc_article_text_rejects_an_empty_parse_result() -> None:
     """A missing parse block is an error, not an empty document."""
     with pytest.raises(WikiDocFetchError):
@@ -152,10 +244,14 @@ def test_scrape_wikidoc_threads_the_continue_token_across_listing_batches(
     """
     batches = {
         None: {
-            "continue": {"apcontinue": "Sepsis"},
-            "query": {"allpages": [{"pageid": 1, "title": "Hypertension"}]},
+            "continue": {"gapcontinue": "Sepsis"},
+            "query": {
+                "pages": [{"pageid": 1, "title": "Hypertension", "revisions": [{"timestamp": "2022-01-01T00:00:00Z"}]}]
+            },
         },
-        "Sepsis": {"query": {"allpages": [{"pageid": 2, "title": "Sepsis"}]}},
+        "Sepsis": {
+            "query": {"pages": [{"pageid": 2, "title": "Sepsis", "revisions": [{"timestamp": "2017-05-06T07:08:09Z"}]}]}
+        },
     }
     seen_tokens: list[str | None] = []
 
@@ -163,8 +259,8 @@ def test_scrape_wikidoc_threads_the_continue_token_across_listing_batches(
         params = request.url.params
         if params.get("meta") == "siteinfo":
             return httpx.Response(200, text=json.dumps({"query": {"statistics": {"articles": 2}}}))
-        if params.get("list") == "allpages":
-            token = params.get("apcontinue")
+        if params.get("generator") == "allpages":
+            token = params.get("gapcontinue")
             assert len(seen_tokens) < len(batches), f"listing did not terminate; tokens={seen_tokens}"
             seen_tokens.append(token)
             return httpx.Response(200, text=json.dumps(batches[token]))
@@ -203,9 +299,9 @@ def test_scrape_wikidoc_skips_articles_wikidoc_cannot_serve(monkeypatch: pytest.
     """One corrupt page does not abort a run over the rest of the listing."""
     listing = {
         "query": {
-            "allpages": [
+            "pages": [
                 {"pageid": 1, "title": "Hypertelorism"},
-                {"pageid": 2, "title": "Sepsis"},
+                {"pageid": 2, "title": "Sepsis", "revisions": [{"timestamp": "2017-05-06T07:08:09Z"}]},
             ]
         }
     }
@@ -214,7 +310,7 @@ def test_scrape_wikidoc_skips_articles_wikidoc_cannot_serve(monkeypatch: pytest.
         params = request.url.params
         if params.get("meta") == "siteinfo":
             return httpx.Response(200, text=json.dumps({"query": {"statistics": {"articles": 2}}}))
-        if params.get("list") == "allpages":
+        if params.get("generator") == "allpages":
             return httpx.Response(200, text=json.dumps(listing))
         title = params["page"]
         if title == "Hypertelorism":
