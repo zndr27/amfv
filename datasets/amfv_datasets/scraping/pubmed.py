@@ -6,6 +6,7 @@ copyright. This module deliberately scrapes the intersection with the PMC Open
 Access subset instead:
 
     Guideline[pt] AND pubmed pmc open access[filter] AND English[la]
+        NOT "Retracted Publication"[pt]
 
 That is about 3,000 guidelines, growing by a handful a week, and it is the only
 slice where the full text is both retrievable and openly licensed.
@@ -70,7 +71,15 @@ PMC_ARTICLE_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles"
 # scraped through its English listing). PubMed's API returns every language, so
 # the filter is explicit here to match. The excluded records are largely French
 # CMAJ translations of English guidelines already in the corpus.
-SEARCH_TERM = "Guideline[pt] AND pubmed pmc open access[filter] AND English[la]"
+#
+# Retracted articles keep their `Guideline` type and stay in the open-access
+# subset, so nothing else here excludes them: PMID 37026270, a retracted 2023
+# rosacea practice pattern, is in the result set today. A retracted guideline is
+# precisely the document a fact verifier must not retrieve as evidence, so it is
+# dropped at search time rather than recorded like the licence fields are. That
+# is the one place this scraper decides instead of records, because there is no
+# reading under which retracted guidance is valid evidence.
+SEARCH_TERM = 'Guideline[pt] AND pubmed pmc open access[filter] AND English[la] NOT "Retracted Publication"[pt]'
 PUBMED_DATASET_NAME = "pubmed-webscrape"
 PUBMED_DATASET_DISPLAY_NAME = "PubMed Webscrape"
 NCBI_TOOL = "amfv"

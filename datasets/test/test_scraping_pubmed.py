@@ -9,6 +9,7 @@ from amfv_datasets.scraping import base
 from amfv_datasets.scraping.html import LinkMode
 from amfv_datasets.scraping.pubmed import (
     LISTING_PAGE_SIZE,
+    SEARCH_TERM,
     PubMedArticleRef,
     PubMedFetchError,
     build_pubmed_article_text,
@@ -180,6 +181,24 @@ def test_list_pubmed_guidelines_pages_by_numeric_offset() -> None:
 
     assert seen == [2 * LISTING_PAGE_SIZE]
     assert [ref.pmid for ref in listing.refs] == ["333"]
+
+
+def test_list_pubmed_guidelines_excludes_retracted_publications() -> None:
+    """Retracted guidelines keep the `Guideline` type, so only this clause drops them.
+
+    PMID 37026270, a retracted 2023 rosacea practice pattern, is in the
+    open-access subset today and is what this guards against re-admitting.
+    """
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request.url.params["term"])
+        return httpx.Response(200, text=json.dumps({"esearchresult": {"count": "0", "idlist": []}}))
+
+    list_pubmed_guidelines(httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert sent == [SEARCH_TERM]
+    assert 'NOT "Retracted Publication"[pt]' in sent[0]
 
 
 def test_list_pubmed_guidelines_returns_no_refs_past_the_end_of_the_listing() -> None:
