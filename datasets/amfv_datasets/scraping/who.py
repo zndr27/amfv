@@ -57,6 +57,7 @@ _PUBLICATION_PATH_RE = re.compile(
 )
 _ISBN_RE = re.compile(r"ISBN:\s*([\d\-]+)", re.IGNORECASE)
 
+
 class WhoFetchError(ScrapeError):
     """Raised when a WHO publication cannot be fetched or parsed."""
 
@@ -96,9 +97,7 @@ def publication_ref_from_url(url: str) -> WhoPublicationRef:
 
     match = _PUBLICATION_PATH_RE.match(parsed.path.rstrip("/") + "/")
     if not match:
-        raise WhoFetchError(
-            f"Enter a URL like https://www.who.int/publications/i/item/9789240121805; got {url!r}"
-        )
+        raise WhoFetchError(f"Enter a URL like https://www.who.int/publications/i/item/9789240121805; got {url!r}")
 
     publication_id = match.group("publication_id")
     return WhoPublicationRef(
@@ -269,11 +268,7 @@ def build_publication_text(
     if not sections:
         raise WhoFetchError(f"No publication content section for '{ref.publication_id}'")
 
-    title = (
-        ref.title
-        if ref.title != ref.publication_id
-        else document_title(html_text, fallback=ref.publication_id)
-    )
+    title = ref.title if ref.title != ref.publication_id else document_title(html_text, fallback=ref.publication_id)
     overview_html = _overview_html(sections[0])
     markdown = html_to_markdown(overview_html, link_mode=link_mode, base_url=BASE_URL).strip()
     if not markdown:

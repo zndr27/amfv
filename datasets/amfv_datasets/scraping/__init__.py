@@ -1,10 +1,10 @@
 """Web scraping helpers and source-specific scrapers."""
 
 from amfv_datasets.scraping.base import (
+    USER_AGENT,
+    ScrapedDocument,
     ScrapeError,
     ScrapeRun,
-    ScrapedDocument,
-    USER_AGENT,
     default_client,
     scrape_listing_documents,
 )
@@ -35,8 +35,10 @@ from amfv_datasets.scraping.idsa import (
     IDSAGuidelineRef,
     idsa_ref_from_url,
     list_practice_guidelines,
-    scrape_guideline as scrape_idsa_guideline,
     scrape_idsa,
+)
+from amfv_datasets.scraping.idsa import (
+    scrape_guideline as scrape_idsa_guideline,
 )
 from amfv_datasets.scraping.nice import (
     GuidanceListingPage,

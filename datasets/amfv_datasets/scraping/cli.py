@@ -8,6 +8,7 @@ import sys
 from collections.abc import Iterable
 from dataclasses import asdict
 from enum import StrEnum
+from itertools import chain
 from pathlib import Path
 from typing import Annotated, TextIO
 
@@ -25,22 +26,22 @@ from rich.progress import (
 )
 
 from amfv_datasets.scraping.base import ScrapedDocument, ScrapeRun
-from amfv_datasets.scraping.html import LinkMode
-from amfv_datasets.scraping.nice import scrape_nice
-from amfv_datasets.scraping.who import scrape_who
-from amfv_datasets.scraping.idsa import scrape_idsa
 from amfv_datasets.scraping.cps import scrape_cps
-from amfv_datasets.scraping.rch import scrape_rch
+from amfv_datasets.scraping.html import LinkMode
+from amfv_datasets.scraping.idsa import scrape_idsa
+from amfv_datasets.scraping.nice import scrape_nice
 from amfv_datasets.scraping.pubmed import scrape_pubmed
+from amfv_datasets.scraping.rch import scrape_rch
+from amfv_datasets.scraping.who import scrape_who
 
 
 class ScraperSource(StrEnum):
     """Supported scraper sources."""
 
     ALL = "all"
+    IDSA = "idsa"
     NICE = "nice"
     WHO = "who"
-    IDSA = "idsa"
     CPS = "cps"
     RCH = "rch"
     PUBMED = "pubmed"
@@ -63,6 +64,8 @@ def scrape_documents(
     documents: int | None,
     link_mode: LinkMode,
     url: str | None = None,
+    include_archived: bool = False,
+    include_in_development: bool = False,
 ) -> ScrapeRun:
     """Configure a scrape for a source.
 
@@ -74,27 +77,45 @@ def scrape_documents(
         link_mode: Whether links are kept as markdown links or stripped to their
             visible text.
         url: Source URL to scrape as a single document (default: None).
+        include_archived: Whether IDSA archived guidelines are included
+            (default: False).
+        include_in_development: Whether IDSA in-development guidelines are
+            included (default: False).
     """
     if documents is not None and documents < 1:
         raise ValueError(f"documents must be at least 1; got {documents}")
 
+    scrape_runs: list[ScrapeRun] = []
     for selected_source in _expand_source(source):
         match selected_source:
-            case ScraperSource.NICE:
-                return scrape_nice(documents=documents, link_mode=link_mode, url=url)
-            case ScraperSource.WHO:
-                return scrape_who(documents=documents, link_mode=link_mode, url=url)
             case ScraperSource.IDSA:
-                return scrape_idsa(documents=documents, link_mode=link_mode, url=url)
+                scrape_runs.append(
+                    scrape_idsa(
+                        documents=documents,
+                        link_mode=link_mode,
+                        url=url,
+                        include_archived=include_archived,
+                        include_in_development=include_in_development,
+                    )
+                )
+            case ScraperSource.NICE:
+                scrape_runs.append(scrape_nice(documents=documents, link_mode=link_mode, url=url))
+            case ScraperSource.WHO:
+                scrape_runs.append(scrape_who(documents=documents, link_mode=link_mode, url=url))
             case ScraperSource.CPS:
-                return scrape_cps(documents=documents, link_mode=link_mode, url=url)
+                scrape_runs.append(scrape_cps(documents=documents, link_mode=link_mode, url=url))
             case ScraperSource.RCH:
-                return scrape_rch(documents=documents, link_mode=link_mode, url=url)
+                scrape_runs.append(scrape_rch(documents=documents, link_mode=link_mode, url=url))
             case ScraperSource.PUBMED:
-                return scrape_pubmed(documents=documents, link_mode=link_mode, url=url)
+                scrape_runs.append(scrape_pubmed(documents=documents, link_mode=link_mode, url=url))
             case ScraperSource.ALL:
                 raise AssertionError("expanded source cannot be all")
-    raise AssertionError(f"unsupported source: {source}")
+    if not scrape_runs:
+        raise AssertionError(f"unsupported source: {source}")
+    if len(scrape_runs) == 1:
+        return scrape_runs[0]
+    total = None if any(run.total is None for run in scrape_runs) else sum(run.total or 0 for run in scrape_runs)
+    return ScrapeRun(documents=chain.from_iterable(run.documents for run in scrape_runs), total=total)
 
 
 def write_jsonl(documents: Iterable[ScrapedDocument], output: TextIO) -> int:
@@ -145,7 +166,7 @@ def write_markdown_files(documents: Iterable[ScrapedDocument], output_path: Path
 
 def _expand_source(source: ScraperSource) -> tuple[ScraperSource, ...]:
     if source is ScraperSource.ALL:
-        return (ScraperSource.NICE,)
+        return (ScraperSource.NICE, ScraperSource.IDSA)
     return (source,)
 
 
@@ -155,6 +176,8 @@ def run(
     url: Annotated[str | None, typer.Option("--url", help="Source URL to scrape as a single document.")] = None,
     documents: Annotated[str, typer.Option("--documents", help="Number of documents to scrape, or 'all'.")] = "1",
     link_mode: Annotated[LinkMode, typer.Option("--links", help="Whether to keep markdown links or strip links to text.")] = LinkMode.KEEP,  # noqa: E501
+    include_archived: Annotated[bool, typer.Option("--include-archived/--exclude-archived", help="Include archived guidelines for sources that expose archival status.")] = False,  # noqa: E501
+    include_in_development: Annotated[bool, typer.Option("--include-in-development/--exclude-in-development", help="Include in-development guidelines for sources that expose development status.")] = False,  # noqa: E501
     output_format: Annotated[OutputFormat, typer.Option("--format", "-f", help="Output format.")] = OutputFormat.JSONL,
     output_path: Annotated[Path | None, typer.Option("--output", "-o", help="Output JSONL file, markdown directory, or Hugging Face dataset directory. JSONL defaults to stdout.")] = None,  # noqa: E501
     progress: Annotated[bool, typer.Option("--progress/--no-progress", help="Show a Rich progress bar.")] = True,
@@ -167,6 +190,10 @@ def run(
         documents: Number of documents to scrape, or "all" (default: "1").
         link_mode: Whether links are kept as markdown links or stripped to their
             visible text (default: LinkMode.KEEP).
+        include_archived: Whether archived guidelines are included for sources
+            that expose archival status (default: False).
+        include_in_development: Whether in-development guidelines are included
+            for sources that expose development status (default: False).
         output_format: Output format to write (default: OutputFormat.JSONL).
         output_path: Output JSONL file, markdown directory, or Hugging Face
             dataset directory. When unset, JSONL is written to stdout (default:
@@ -174,7 +201,14 @@ def run(
         progress: Whether to show a Rich progress bar (default: True).
     """
     parsed_documents = _parse_documents(documents)
-    scrape_run = scrape_documents(source, documents=parsed_documents, link_mode=link_mode, url=url)
+    scrape_run = scrape_documents(
+        source,
+        documents=parsed_documents,
+        link_mode=link_mode,
+        url=url,
+        include_archived=include_archived,
+        include_in_development=include_in_development,
+    )
     scraped_documents = scrape_run.documents
     if progress:
         scraped_documents = _progress_documents(scraped_documents, total=scrape_run.total)

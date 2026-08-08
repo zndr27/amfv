@@ -25,8 +25,7 @@ _CVC_GUIDELINE_TITLE = (
     "associated with the use of intravascular catheters: part 2: central venous catheters"
 )
 _CERVICAL_GUIDELINE_TITLE = (
-    "WHO guideline for screening and treatment of cervical pre-cancer lesions "
-    "for cervical cancer prevention"
+    "WHO guideline for screening and treatment of cervical pre-cancer lesions for cervical cancer prevention"
 )
 
 
