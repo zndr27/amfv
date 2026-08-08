@@ -17,6 +17,16 @@ from amfv_datasets.scraping.html import (
     first_matching_urls,
     html_to_markdown,
 )
+from amfv_datasets.scraping.idsa import (
+    IDSAFetchError,
+    IDSAGuidelineRef,
+    idsa_ref_from_url,
+    list_practice_guidelines,
+    scrape_idsa,
+)
+from amfv_datasets.scraping.idsa import (
+    scrape_guideline as scrape_idsa_guideline,
+)
 from amfv_datasets.scraping.nice import (
     GuidanceListingPage,
     GuidanceRef,
@@ -41,6 +51,8 @@ from amfv_datasets.scraping.who import (
 __all__ = [
     "GuidanceRef",
     "GuidanceListingPage",
+    "IDSAFetchError",
+    "IDSAGuidelineRef",
     "LinkMode",
     "NiceFetchError",
     "OutputFormat",
@@ -61,10 +73,14 @@ __all__ = [
     "first_matching_urls",
     "guidance_ref_from_url",
     "html_to_markdown",
+    "idsa_ref_from_url",
+    "list_practice_guidelines",
     "list_published_guidance",
     "list_publications",
     "publication_ref_from_url",
     "scrape_guideline",
+    "scrape_idsa",
+    "scrape_idsa_guideline",
     "scrape_listing_documents",
     "scrape_nice",
     "scrape_publication",
