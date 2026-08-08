@@ -1,14 +1,27 @@
 """Web scraping helpers and source-specific scrapers."""
 
 from amfv_datasets.scraping.base import (
-    USER_AGENT,
-    ScrapedDocument,
     ScrapeError,
     ScrapeRun,
+    ScrapedDocument,
+    USER_AGENT,
     default_client,
     scrape_listing_documents,
 )
-from amfv_datasets.scraping.cli import OutputFormat, ScraperSource
+from amfv_datasets.scraping.cli import (
+    OutputFormat,
+    ScraperSource,
+)
+from amfv_datasets.scraping.cps import (
+    CpsFetchError,
+    CpsStatementRef,
+    build_statement_text,
+    list_statements,
+    listing_page_url,
+    scrape_cps,
+    scrape_statement,
+    statement_ref_from_url,
+)
 from amfv_datasets.scraping.html import (
     LinkMode,
     absolute_unique_urls,
@@ -22,10 +35,8 @@ from amfv_datasets.scraping.idsa import (
     IDSAGuidelineRef,
     idsa_ref_from_url,
     list_practice_guidelines,
-    scrape_idsa,
-)
-from amfv_datasets.scraping.idsa import (
     scrape_guideline as scrape_idsa_guideline,
+    scrape_idsa,
 )
 from amfv_datasets.scraping.nice import (
     GuidanceListingPage,
@@ -36,6 +47,21 @@ from amfv_datasets.scraping.nice import (
     list_published_guidance,
     scrape_guideline,
     scrape_nice,
+)
+from amfv_datasets.scraping.pubmed import (
+    PubMedArticleRef,
+    PubMedFetchError,
+    PubMedListingPage,
+    build_pubmed_article_text,
+    list_pubmed_guidelines,
+    pubmed_ref_from_url,
+    scrape_pubmed,
+    scrape_pubmed_article,
+)
+from amfv_datasets.scraping.rch import (
+    RchFetchError,
+    RchGuidelineRef,
+    scrape_rch,
 )
 from amfv_datasets.scraping.who import (
     WhoFetchError,
@@ -49,13 +75,20 @@ from amfv_datasets.scraping.who import (
 )
 
 __all__ = [
-    "GuidanceRef",
+    "CpsFetchError",
+    "CpsStatementRef",
     "GuidanceListingPage",
+    "GuidanceRef",
     "IDSAFetchError",
     "IDSAGuidelineRef",
     "LinkMode",
     "NiceFetchError",
     "OutputFormat",
+    "PubMedArticleRef",
+    "PubMedFetchError",
+    "PubMedListingPage",
+    "RchFetchError",
+    "RchGuidelineRef",
     "ScrapeError",
     "ScrapeRun",
     "ScrapedDocument",
@@ -67,22 +100,34 @@ __all__ = [
     "absolute_unique_urls",
     "build_guideline_text",
     "build_publication_text",
+    "build_pubmed_article_text",
+    "build_statement_text",
     "clean_text",
-    "document_title",
     "default_client",
+    "document_title",
     "first_matching_urls",
     "guidance_ref_from_url",
     "html_to_markdown",
     "idsa_ref_from_url",
     "list_practice_guidelines",
-    "list_published_guidance",
     "list_publications",
+    "list_published_guidance",
+    "list_pubmed_guidelines",
+    "list_statements",
+    "listing_page_url",
     "publication_ref_from_url",
+    "pubmed_ref_from_url",
+    "scrape_cps",
     "scrape_guideline",
     "scrape_idsa",
     "scrape_idsa_guideline",
     "scrape_listing_documents",
     "scrape_nice",
     "scrape_publication",
+    "scrape_pubmed",
+    "scrape_pubmed_article",
+    "scrape_rch",
+    "scrape_statement",
     "scrape_who",
+    "statement_ref_from_url",
 ]

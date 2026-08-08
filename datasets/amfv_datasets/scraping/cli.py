@@ -28,6 +28,10 @@ from amfv_datasets.scraping.base import ScrapedDocument, ScrapeRun
 from amfv_datasets.scraping.html import LinkMode
 from amfv_datasets.scraping.nice import scrape_nice
 from amfv_datasets.scraping.who import scrape_who
+from amfv_datasets.scraping.idsa import scrape_idsa
+from amfv_datasets.scraping.cps import scrape_cps
+from amfv_datasets.scraping.rch import scrape_rch
+from amfv_datasets.scraping.pubmed import scrape_pubmed
 
 
 class ScraperSource(StrEnum):
@@ -36,6 +40,10 @@ class ScraperSource(StrEnum):
     ALL = "all"
     NICE = "nice"
     WHO = "who"
+    IDSA = "idsa"
+    CPS = "cps"
+    RCH = "rch"
+    PUBMED = "pubmed"
 
 
 class OutputFormat(StrEnum):
@@ -76,6 +84,14 @@ def scrape_documents(
                 return scrape_nice(documents=documents, link_mode=link_mode, url=url)
             case ScraperSource.WHO:
                 return scrape_who(documents=documents, link_mode=link_mode, url=url)
+            case ScraperSource.IDSA:
+                return scrape_idsa(documents=documents, link_mode=link_mode, url=url)
+            case ScraperSource.CPS:
+                return scrape_cps(documents=documents, link_mode=link_mode, url=url)
+            case ScraperSource.RCH:
+                return scrape_rch(documents=documents, link_mode=link_mode, url=url)
+            case ScraperSource.PUBMED:
+                return scrape_pubmed(documents=documents, link_mode=link_mode, url=url)
             case ScraperSource.ALL:
                 raise AssertionError("expanded source cannot be all")
     raise AssertionError(f"unsupported source: {source}")
@@ -129,7 +145,7 @@ def write_markdown_files(documents: Iterable[ScrapedDocument], output_path: Path
 
 def _expand_source(source: ScraperSource) -> tuple[ScraperSource, ...]:
     if source is ScraperSource.ALL:
-        return (ScraperSource.NICE, ScraperSource.WHO)
+        return (ScraperSource.NICE,)
     return (source,)
 
 
