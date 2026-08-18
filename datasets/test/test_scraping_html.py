@@ -77,3 +77,12 @@ def test_html_to_markdown_absolutizes_images() -> None:
     assert html_to_markdown(html_text, base_url="https://example.org/guideline/") == (
         "![Treatment flowchart](https://example.org/images/flowchart.png)"
     )
+
+
+def test_html_to_markdown_keeps_in_page_anchors_relative() -> None:
+    """A link to a heading in the same document is not rewritten to the base URL."""
+    html_text = '<p>See <a href="#recommendations">recommendations</a>.</p>'
+
+    assert html_to_markdown(html_text, base_url="https://example.org/guideline/") == (
+        "See [recommendations](#recommendations)."
+    )
