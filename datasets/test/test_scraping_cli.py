@@ -70,15 +70,11 @@ def test_cli_run_writes_jsonl_to_stdout(monkeypatch: pytest.MonkeyPatch) -> None
         documents: int | None,
         link_mode: LinkMode,
         url: str | None = None,
-        include_archived: bool = False,
-        include_in_development: bool = False,
     ) -> ScrapeRun:
         assert source is ScraperSource.NICE
         assert documents == 3
         assert link_mode is LinkMode.STRIP
         assert url is None
-        assert include_archived is False
-        assert include_in_development is False
         return ScrapeRun([_document()], total=3)
 
     monkeypatch.setattr("amfv_datasets.scraping.cli.scrape_documents", fake_scrape_documents)
@@ -109,8 +105,6 @@ def test_cli_run_can_disable_progress_for_file_output(monkeypatch: pytest.Monkey
         documents: int | None,
         link_mode: LinkMode,
         url: str | None = None,
-        include_archived: bool = False,
-        include_in_development: bool = False,
     ) -> ScrapeRun:
         return ScrapeRun([_document()], total=None)
 
@@ -143,8 +137,6 @@ def test_cli_run_uses_progress_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
         documents: int | None,
         link_mode: LinkMode,
         url: str | None = None,
-        include_archived: bool = False,
-        include_in_development: bool = False,
     ) -> ScrapeRun:
         return ScrapeRun([_document()], total=7)
 
@@ -212,15 +204,11 @@ def test_cli_run_accepts_all_documents(monkeypatch: pytest.MonkeyPatch) -> None:
         documents: int | None,
         link_mode: LinkMode,
         url: str | None = None,
-        include_archived: bool = False,
-        include_in_development: bool = False,
     ) -> ScrapeRun:
         assert source is ScraperSource.ALL
         assert documents is None
         assert link_mode is LinkMode.KEEP
         assert url is None
-        assert include_archived is False
-        assert include_in_development is False
         return ScrapeRun([_document()], total=12)
 
     monkeypatch.setattr("amfv_datasets.scraping.cli.scrape_documents", fake_scrape_documents)
@@ -231,115 +219,6 @@ def test_cli_run_accepts_all_documents(monkeypatch: pytest.MonkeyPatch) -> None:
     assert json.loads(result.stdout.splitlines()[0])["external_id"] == "nice-ng1"
 
 
-def test_cli_run_accepts_idsa_status_flags(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The CLI forwards IDSA status inclusion flags."""
-    runner = CliRunner()
-
-    def fake_scrape_documents(
-        source: ScraperSource,
-        *,
-        documents: int | None,
-        link_mode: LinkMode,
-        url: str | None = None,
-        include_archived: bool = False,
-        include_in_development: bool = False,
-    ) -> ScrapeRun:
-        assert source is ScraperSource.IDSA
-        assert documents == 2
-        assert link_mode is LinkMode.KEEP
-        assert url is None
-        assert include_archived is True
-        assert include_in_development is True
-        return ScrapeRun([_idsa_document()], total=2)
-
-    monkeypatch.setattr("amfv_datasets.scraping.cli.scrape_documents", fake_scrape_documents)
-
-    result = runner.invoke(
-        app,
-        ["--source", "idsa", "--documents", "2", "--include-archived", "--include-in-development"],
-    )
-
-    assert result.exit_code == 0
-    assert json.loads(result.stdout.splitlines()[0])["external_id"] == "idsa-current-guideline"
-    assert "scraped 1 documents from idsa" in result.stderr
-
-
-def test_scrape_documents_dispatches_idsa(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The scrape dispatcher calls the IDSA scraper for the IDSA source."""
-
-    def fake_scrape_idsa(
-        *,
-        documents: int | None,
-        link_mode: LinkMode,
-        url: str | None,
-        include_archived: bool,
-        include_in_development: bool,
-    ) -> ScrapeRun:
-        assert documents == 1
-        assert link_mode is LinkMode.STRIP
-        assert url == "https://www.idsociety.org/practice-guideline/current-guideline/"
-        assert include_archived is True
-        assert include_in_development is False
-        return ScrapeRun([_idsa_document()], total=1)
-
-    monkeypatch.setattr("amfv_datasets.scraping.cli.scrape_idsa", fake_scrape_idsa)
-
-    from amfv_datasets.scraping.cli import scrape_documents
-
-    scrape_run = scrape_documents(
-        ScraperSource.IDSA,
-        documents=1,
-        link_mode=LinkMode.STRIP,
-        url="https://www.idsociety.org/practice-guideline/current-guideline/",
-        include_archived=True,
-    )
-
-    assert list(scrape_run.documents) == [_idsa_document()]
-
-
-def test_scrape_documents_all_includes_idsa(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The all source combines NICE and IDSA scrape runs."""
-
-    def fake_scrape_nice(
-        *,
-        documents: int | None,
-        link_mode: LinkMode,
-        url: str | None,
-    ) -> ScrapeRun:
-        assert documents == 1
-        assert link_mode is LinkMode.KEEP
-        assert url is None
-        return ScrapeRun([_document()], total=1)
-
-    def fake_scrape_idsa(
-        *,
-        documents: int | None,
-        link_mode: LinkMode,
-        url: str | None,
-        include_archived: bool,
-        include_in_development: bool,
-    ) -> ScrapeRun:
-        assert documents == 1
-        assert link_mode is LinkMode.KEEP
-        assert url is None
-        assert include_archived is False
-        assert include_in_development is False
-        return ScrapeRun([_idsa_document()], total=1)
-
-    monkeypatch.setattr("amfv_datasets.scraping.cli.scrape_nice", fake_scrape_nice)
-    monkeypatch.setattr("amfv_datasets.scraping.cli.scrape_idsa", fake_scrape_idsa)
-
-    from amfv_datasets.scraping.cli import scrape_documents
-
-    scrape_run = scrape_documents(ScraperSource.ALL, documents=1, link_mode=LinkMode.KEEP)
-
-    assert scrape_run.total == 2
-    assert [document.external_id for document in scrape_run.documents] == [
-        "nice-ng1",
-        "idsa-current-guideline",
-    ]
-
-
 def _document() -> ScrapedDocument:
     return ScrapedDocument(
         source="nice",
@@ -348,17 +227,6 @@ def _document() -> ScrapedDocument:
         url="https://www.nice.org.uk/guidance/ng1",
         content="content",
         metadata={"ref": "NG1"},
-    )
-
-
-def _idsa_document() -> ScrapedDocument:
-    return ScrapedDocument(
-        source="idsa",
-        external_id="idsa-current-guideline",
-        title="Current Guideline",
-        url="https://www.idsociety.org/practice-guideline/current-guideline/",
-        content="content",
-        metadata={"slug": "current-guideline"},
     )
 
 
