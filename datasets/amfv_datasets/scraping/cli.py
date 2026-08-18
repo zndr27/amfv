@@ -8,8 +8,9 @@ import sys
 from collections.abc import Iterable
 from dataclasses import asdict
 from enum import StrEnum
+from itertools import chain
 from pathlib import Path
-from typing import Annotated, TextIO
+from typing import Annotated, Protocol, TextIO
 
 import typer
 from rich.console import Console
@@ -29,11 +30,20 @@ from amfv_datasets.scraping.html import LinkMode
 from amfv_datasets.scraping.nice import scrape_nice
 
 
-class ScraperSource(StrEnum):
-    """Supported scraper sources."""
+class Scraper(Protocol):
+    """Entry point a source module exposes to run one scrape."""
 
-    ALL = "all"
-    NICE = "nice"
+    def __call__(self, *, documents: int | None, link_mode: LinkMode, url: str | None) -> ScrapeRun:
+        """Scrape a source into a run of documents."""
+        ...
+
+
+ALL_SOURCES = "all"
+
+SCRAPERS: dict[str, Scraper] = {
+    "nice": scrape_nice,
+}
+"""Scraper entry point by source name. Adding a source is an import and an entry here."""
 
 
 class OutputFormat(StrEnum):
@@ -48,7 +58,7 @@ app = typer.Typer(no_args_is_help=False, help="Run AMFV dataset web scrapers.")
 
 
 def scrape_documents(
-    source: ScraperSource,
+    source: str,
     *,
     documents: int | None,
     link_mode: LinkMode,
@@ -57,8 +67,8 @@ def scrape_documents(
     """Configure a scrape for a source.
 
     Args:
-        source: Scraper source to run. Use `ScraperSource.ALL` to run every
-            implemented source.
+        source: Scraper source to run. Use `ALL_SOURCES` to run every registered
+            source.
         documents: Number of documents to scrape. When unset, each source runs
             until it is exhausted (default: None).
         link_mode: Whether links are kept as markdown links or stripped to their
@@ -68,13 +78,11 @@ def scrape_documents(
     if documents is not None and documents < 1:
         raise ValueError(f"documents must be at least 1; got {documents}")
 
-    for selected_source in _expand_source(source):
-        match selected_source:
-            case ScraperSource.NICE:
-                return scrape_nice(documents=documents, link_mode=link_mode, url=url)
-            case ScraperSource.ALL:
-                raise AssertionError("expanded source cannot be all")
-    raise AssertionError(f"unsupported source: {source}")
+    scrape_runs = [SCRAPERS[name](documents=documents, link_mode=link_mode, url=url) for name in _expand_source(source)]
+    if len(scrape_runs) == 1:
+        return scrape_runs[0]
+    total = None if any(run.total is None for run in scrape_runs) else sum(run.total or 0 for run in scrape_runs)
+    return ScrapeRun(documents=chain.from_iterable(run.documents for run in scrape_runs), total=total)
 
 
 def write_jsonl(documents: Iterable[ScrapedDocument], output: TextIO) -> int:
@@ -123,15 +131,17 @@ def write_markdown_files(documents: Iterable[ScrapedDocument], output_path: Path
     return count
 
 
-def _expand_source(source: ScraperSource) -> tuple[ScraperSource, ...]:
-    if source is ScraperSource.ALL:
-        return (ScraperSource.NICE,)
+def _expand_source(source: str) -> tuple[str, ...]:
+    if source == ALL_SOURCES:
+        return tuple(SCRAPERS)
+    if source not in SCRAPERS:
+        raise typer.BadParameter(f"unknown source {source!r}; choose from {', '.join([ALL_SOURCES, *SCRAPERS])}")
     return (source,)
 
 
 @app.command(help="Run a scraper and write the scraped documents.")
 def run(
-    source: Annotated[ScraperSource, typer.Option("--source", help="Scraper source to run.")],
+    source: Annotated[str, typer.Option("--source", help=f"Scraper source to run: {', '.join([ALL_SOURCES, *SCRAPERS])}.")],  # noqa: E501
     url: Annotated[str | None, typer.Option("--url", help="Source URL to scrape as a single document.")] = None,
     documents: Annotated[str, typer.Option("--documents", help="Number of documents to scrape, or 'all'.")] = "1",
     link_mode: Annotated[LinkMode, typer.Option("--links", help="Whether to keep markdown links or strip links to text.")] = LinkMode.KEEP,  # noqa: E501
@@ -168,7 +178,7 @@ def run(
         if output_path is None:
             raise typer.BadParameter("--output is required when --format markdown")
         count = write_markdown_files(scraped_documents, output_path)
-    target = url or source.value
+    target = url or source
     typer.echo(f"scraped {count} documents from {target}", err=True)
 
 
@@ -248,8 +258,10 @@ def main() -> None:
 
 
 __all__ = [
+    "ALL_SOURCES",
+    "SCRAPERS",
     "OutputFormat",
-    "ScraperSource",
+    "Scraper",
     "app",
     "LinkMode",
     "main",

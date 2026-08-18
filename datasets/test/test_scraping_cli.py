@@ -9,7 +9,9 @@ from typer.testing import CliRunner
 
 from amfv_datasets.scraping.base import ScrapedDocument, ScrapeRun
 from amfv_datasets.scraping.cli import (
-    ScraperSource,
+    ALL_SOURCES,
+    SCRAPERS,
+    _expand_source,
     app,
     write_huggingface_dataset,
     write_jsonl,
@@ -65,13 +67,13 @@ def test_cli_run_writes_jsonl_to_stdout(monkeypatch: pytest.MonkeyPatch) -> None
     runner = CliRunner()
 
     def fake_scrape_documents(
-        source: ScraperSource,
+        source: str,
         *,
         documents: int | None,
         link_mode: LinkMode,
         url: str | None = None,
     ) -> ScrapeRun:
-        assert source is ScraperSource.NICE
+        assert source == "nice"
         assert documents == 3
         assert link_mode is LinkMode.STRIP
         assert url is None
@@ -100,7 +102,7 @@ def test_cli_run_can_disable_progress_for_file_output(monkeypatch: pytest.Monkey
     runner = CliRunner()
 
     def fake_scrape_documents(
-        source: ScraperSource,
+        source: str,
         *,
         documents: int | None,
         link_mode: LinkMode,
@@ -132,7 +134,7 @@ def test_cli_run_uses_progress_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
     progress_calls = 0
 
     def fake_scrape_documents(
-        source: ScraperSource,
+        source: str,
         *,
         documents: int | None,
         link_mode: LinkMode,
@@ -182,7 +184,7 @@ def test_cli_run_accepts_source_url(monkeypatch: pytest.MonkeyPatch) -> None:
         assert total == 1
         yield from documents
 
-    monkeypatch.setattr("amfv_datasets.scraping.cli.scrape_nice", fake_scrape_nice)
+    monkeypatch.setitem(SCRAPERS, "nice", fake_scrape_nice)
     monkeypatch.setattr("amfv_datasets.scraping.cli._progress_documents", fake_progress)
 
     result = runner.invoke(
@@ -199,13 +201,13 @@ def test_cli_run_accepts_all_documents(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
 
     def fake_scrape_documents(
-        source: ScraperSource,
+        source: str,
         *,
         documents: int | None,
         link_mode: LinkMode,
         url: str | None = None,
     ) -> ScrapeRun:
-        assert source is ScraperSource.ALL
+        assert source == "all"
         assert documents is None
         assert link_mode is LinkMode.KEEP
         assert url is None
@@ -217,6 +219,22 @@ def test_cli_run_accepts_all_documents(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 0
     assert json.loads(result.stdout.splitlines()[0])["external_id"] == "nice-ng1"
+
+
+def test_cli_run_rejects_an_unregistered_source() -> None:
+    """An unknown --source names the sources that are registered."""
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["--source", "nhs"])
+
+    assert result.exit_code != 0
+    assert "'nhs'" in result.stderr
+    assert "all, nice" in result.stderr
+
+
+def test_expand_source_runs_every_registered_scraper() -> None:
+    """The all source expands to the registry rather than a hand-written list."""
+    assert _expand_source(ALL_SOURCES) == tuple(SCRAPERS)
 
 
 def _document() -> ScrapedDocument:

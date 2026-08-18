@@ -1,4 +1,8 @@
-"""Web scraping helpers and source-specific scrapers."""
+"""Web scraping helpers and source-specific scrapers.
+
+Only the shared scraping contract is re-exported here. Import a source's own
+symbols from its module, so registering a source touches one file.
+"""
 
 from amfv_datasets.scraping.base import (
     USER_AGENT,
@@ -8,7 +12,7 @@ from amfv_datasets.scraping.base import (
     default_client,
     scrape_listing_documents,
 )
-from amfv_datasets.scraping.cli import OutputFormat, ScraperSource
+from amfv_datasets.scraping.cli import ALL_SOURCES, SCRAPERS, OutputFormat, Scraper
 from amfv_datasets.scraping.html import (
     LinkMode,
     absolute_unique_urls,
@@ -17,38 +21,22 @@ from amfv_datasets.scraping.html import (
     first_matching_urls,
     html_to_markdown,
 )
-from amfv_datasets.scraping.nice import (
-    GuidanceListingPage,
-    GuidanceRef,
-    NiceFetchError,
-    build_guideline_text,
-    guidance_ref_from_url,
-    list_published_guidance,
-    scrape_guideline,
-    scrape_nice,
-)
 
 __all__ = [
-    "GuidanceRef",
-    "GuidanceListingPage",
+    "ALL_SOURCES",
     "LinkMode",
-    "NiceFetchError",
     "OutputFormat",
+    "SCRAPERS",
     "ScrapeError",
     "ScrapeRun",
     "ScrapedDocument",
-    "ScraperSource",
+    "Scraper",
     "USER_AGENT",
     "absolute_unique_urls",
-    "build_guideline_text",
     "clean_text",
-    "document_title",
     "default_client",
+    "document_title",
     "first_matching_urls",
-    "guidance_ref_from_url",
     "html_to_markdown",
-    "list_published_guidance",
-    "scrape_guideline",
     "scrape_listing_documents",
-    "scrape_nice",
 ]
